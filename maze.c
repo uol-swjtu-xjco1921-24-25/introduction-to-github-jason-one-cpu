@@ -260,19 +260,75 @@ int has_won(maze *this, coord *player)
 int main()
 {
     // check args
-
+    if (argc != 2)
+    {
+        fprintf(stderr, "Usage: %s <mazefile>\n", argv[0]);
+        return EXIT_ARG_ERROR;
+    }
     // set up some useful variables (you can rename or remove these if you want)
-    coord *player;
+    coord *player = malloc(sizeof(coord));
     maze *this_maze = malloc(sizeof(maze));
     FILE *f;
 
     // open and validate mazefile
-
+    f = fopen(argv[1], "r");
+    if (!f)
+    {
+        perror("Error opening file");
+        free(player);
+        free(this_maze);
+        return EXIT_FILE_ERROR;
+    }
     // read in mazefile to struct
+    int width = get_width(f);
+    int height = get_height(f);
+    if (!width || !height || create_maze(this_maze, height, width))
+    {
+        fclose(f);
+        free(player);
+        free(this_maze);
+        return EXIT_MAZE_ERROR;
+    }
 
+    if (read_maze(this_maze, f))
+    {
+        fclose(f);
+        free_maze(this_maze);
+        free(player);
+        free(this_maze);
+        return EXIT_MAZE_ERROR;
+    }
+    fclose(f);
     // maze game loop
+    char input;
+    while (1)
+    {
+        printf("Enter move (WASD/M/Q): ");
+        scanf(" %c", &input);
 
-    // win
+        if (tolower(input) == 'm')
+        {
+            print_maze(this_maze, player);
+        }
+        else if (tolower(input) == 'q')
+        {
+            break;
+        }
+        else
+        {
+            move(this_maze, player, input);
+        }
 
+        // win
+        if (has_won(this_maze, player))
+        {
+            printf("Congratulations! You won!\n");
+            break;
+        }
+    }
     // return, free, exit
+    free_maze(this_maze);
+    free(player);
+    free(this_maze);
+    return EXIT_SUCCESS;
 }
