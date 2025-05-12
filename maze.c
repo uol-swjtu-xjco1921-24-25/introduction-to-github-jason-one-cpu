@@ -8,6 +8,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 
 // defines for max and min permitted dimensions
 #define MAX_DIM 100
@@ -18,6 +20,7 @@
 #define EXIT_ARG_ERROR 1
 #define EXIT_FILE_ERROR 2
 #define EXIT_MAZE_ERROR 3
+#define EXIT_OTHER_ERROR 100
 
 typedef struct __Coord
 {
@@ -96,6 +99,22 @@ int get_width(FILE *file)
     int width = strlen(line);
     if (line[width - 1] == '\n')
         width--;
+
+    long pos = ftell(file);
+    char verify_line[MAX_DIM + 2];
+    while (fgets(verify_line, sizeof(verify_line), file))
+    {
+        int verify_len = strlen(verify_line);
+        if (verify_len > 0 && verify_line[verify_len - 1] == '\n')
+            verify_len--;
+        if (verify_len != width)
+        {
+            fseek(file, pos, SEEK_SET);
+            return 0;
+        }
+    }
+    fseek(file, pos, SEEK_SET);
+
     if (width < MIN_DIM || width > MAX_DIM)
         return 0;
     return width;
@@ -115,7 +134,10 @@ int get_height(FILE *file)
     rewind(file);
     while (fgets(line, sizeof(line), file))
     {
-        if (strlen(line) < MIN_DIM || strlen(line) > MAX_DIM + 1)
+        int line_len = strlen(line);
+        if (line_len > 0 && line[line_len - 1] == '\n')
+            line_len--;
+        if (line_len < MIN_DIM || line_len > MAX_DIM)
             return 0;
         height++;
     }
@@ -140,6 +162,9 @@ int read_maze(maze *this, FILE *file)
         if (!fgets(line, sizeof(line), file))
             return 1;
         line[strcspn(line, "\n")] = '\0';
+
+        if (strlen(line) != this->width)
+            return 1;
 
         for (int j = 0; j < this->width; j++)
         {
@@ -222,6 +247,7 @@ void move(maze *this, coord *player, char direction)
         dx = 1;
         break;
     default:
+        printf("Invalid direction! Use WASD.\n");
         return;
     }
 
@@ -257,7 +283,7 @@ int has_won(maze *this, coord *player)
     return (player->x == this->end.x && player->y == this->end.y);
 }
 
-int main()
+int main(int argc, char *argv[])
 {
     // check args
     if (argc != 2)
@@ -268,10 +294,17 @@ int main()
     // set up some useful variables (you can rename or remove these if you want)
     coord *player = malloc(sizeof(coord));
     maze *this_maze = malloc(sizeof(maze));
-    FILE *f;
+    if (!player || !this_maze)
+    {
+        if (player)
+            free(player);
+        if (this_maze)
+            free(this_maze);
+        return EXIT_OTHER_ERROR;
+    }
+    FILE *f = fopen(argv[1], "r");
 
     // open and validate mazefile
-    f = fopen(argv[1], "r");
     if (!f)
     {
         perror("Error opening file");
@@ -282,12 +315,20 @@ int main()
     // read in mazefile to struct
     int width = get_width(f);
     int height = get_height(f);
-    if (!width || !height || create_maze(this_maze, height, width))
+    if (!width || !height)
     {
         fclose(f);
         free(player);
         free(this_maze);
         return EXIT_MAZE_ERROR;
+    }
+
+    if (create_maze(this_maze, height, width))
+    {
+        fclose(f);
+        free(player);
+        free(this_maze);
+        return EXIT_OTHER_ERROR;
     }
 
     if (read_maze(this_maze, f))
@@ -299,27 +340,28 @@ int main()
         return EXIT_MAZE_ERROR;
     }
     fclose(f);
+
     // maze game loop
-    char input;
+    player->x = this_maze->start.x;
+    player->y = this_maze->start.y;
+
+    char input[256];
     while (1)
     {
         printf("Enter move (WASD/M/Q): ");
-        scanf(" %c", &input);
-
-        if (tolower(input) == 'm')
-        {
-            print_maze(this_maze, player);
-        }
-        else if (tolower(input) == 'q')
-        {
+        if (!fgets(input, sizeof(input), stdin))
             break;
-        }
-        else
-        {
-            move(this_maze, player, input);
-        }
 
-        // win
+        char cmd = tolower(input[0]);
+        if (cmd == 'm')
+            print_maze(this_maze, player);
+        else if (cmd == 'q')
+            break;
+        else if (strchr("wasd", cmd))
+            move(this_maze, player, cmd);
+        else
+            printf("Invalid command! Valid options: W/A/S/D/M/Q\n");
+
         if (has_won(this_maze, player))
         {
             printf("Congratulations! You won!\n");
