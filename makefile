@@ -1,16 +1,17 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99
+CFLAGS = -Wall -Wextra -Werror -std=c11
+EXEC = maze
+OBJS = main.o maze.o file_io.o game_logic.o utils.o
 
+all: $(EXEC)
 
-SRCS = $(wildcard *.c)
-OBJS = $(SRCS:.c=.o)
-
-all: maze 
-
-maze: $(OBJS)
+$(EXEC): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
 clean:
-	rm -f maze $(OBJS) *~ *.tmp
+	rm -f $(EXEC) *.o
 
 .PHONY: all clean
