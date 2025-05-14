@@ -23,24 +23,24 @@
 #define EXIT_OTHER_ERROR 100
 
 // Coordinate structure
-typedef struct __Coord
+typedef struct Coord
 {
     int x;
     int y;
-} coord;
+} Coord;
 
 // Maze structure
-typedef struct __Maze
+typedef struct Maze
 {
     char **map;
     int width;
     int height;
-    coord start;
-    coord end;
-} maze;
+    Coord start;
+    Coord end;
+} Maze;
 
 // Movement delta structure
-typedef struct __MoveDelta
+typedef struct MoveDelta
 {
     char dir;
     int dx;
@@ -58,202 +58,188 @@ typedef struct __MoveDelta
 static bool safe_malloc(void **ptr, size_t size)
 {
     *ptr = malloc(size);
-    if (!*ptr)
-    {
-        fprintf(stderr, "Memory allocation failed\n");
-        return false;
-    }
-    return true;
+    return *ptr != NULL;
 }
 
 /**
- * @brief Unified error handler
+ * @brief Unified error handler with exit codes
  * @param message Error description
+ * @param code Exit code from specification
  */
-static void handle_error(const char *message)
+static void handle_error(const char *message, int code)
 {
     fprintf(stderr, "Error: %s\n", message);
-    exit(EXIT_OTHER_ERROR);
+    exit(code);
 }
 
 /* ================== Core Functionality ================== */
 
 /**
  * @brief Initialize maze memory structure
- * @param this Maze pointer
+ * @param maze Maze pointer
  * @param height Maze height
  * @param width Maze width
- * @return 0 on success, 1 on failure
+ * @return true on success, false on failure
  */
-int create_maze(maze *this, int height, int width)
+bool maze_create(Maze *maze, int height, int width)
 {
     // Validate dimensions
-    if (height < MIN_DIM || height > MAX_DIM ||
-        width < MIN_DIM || width > MAX_DIM)
+    if (height < MIN_DIM || height > MAX_DIM || width < MIN_DIM || width > MAX_DIM)
     {
-        return 1;
+        return false;
     }
 
     // Allocate row pointers
-    if (!safe_malloc((void **)&this->map, height * sizeof(char *)))
+    if (!safe_malloc((void **)&maze->map, height * sizeof(char *)))
     {
-        return 1;
+        return false;
     }
 
     // Initialize structure
-    memset(this->map, 0, height * sizeof(char *));
-    this->width = width;
-    this->height = height;
-    this->start = (coord){-1, -1};
-    this->end = (coord){-1, -1};
+    memset(maze->map, 0, height * sizeof(char *));
+    maze->width = width;
+    maze->height = height;
+    maze->start = (Coord){-1, -1};
+    maze->end = (Coord){-1, -1};
 
     // Allocate column space
     for (int i = 0; i < height; i++)
     {
-        if (!safe_malloc((void **)&this->map[i], width * sizeof(char)))
+        if (!safe_malloc((void **)&maze->map[i], width * sizeof(char)))
         {
-            // Rollback allocations
+            // Rollback allocations on failure
             for (int j = 0; j < i; j++)
-                free(this->map[j]);
-            free(this->map);
-            return 1;
+                free(maze->map[j]);
+            free(maze->map);
+            return false;
         }
-        memset(this->map[i], '#', width);
+        memset(maze->map[i], '#', width); // Initialize as walls
     }
-    return 0;
+    return true;
 }
 
 /**
  * @brief Free maze memory
- * @param this Maze pointer
+ * @param maze Maze pointer
  */
-void free_maze(maze *this)
+void maze_free(Maze *maze)
 {
-    if (this->map)
+    if (maze->map)
     {
-        for (int i = 0; i < this->height; i++)
-        {
-            free(this->map[i]);
-        }
-        free(this->map);
-        this->map = NULL;
+        for (int i = 0; i < maze->height; i++)
+            free(maze->map[i]);
+        free(maze->map);
     }
 }
 
 /* ================== File Handling ================== */
 
 /**
- * @brief Validate maze file dimensions
+ * @brief Validate maze file dimensions and content
  * @param file File pointer
- * @return Valid width (5-100) or 0 for error
+ * @param width Output width
+ * @param height Output height
+ * @return true if valid, false otherwise
  */
-int get_width(FILE *file)
+bool validate_maze_file(FILE *file, int *width, int *height)
 {
-    char line[MAX_DIM + 2];
-    if (!fgets(line, sizeof(line), file))
-        return 0;
+    char buffer[MAX_DIM + 2];
+    *height = 0;
 
-    int width = strcspn(line, "\n");
-    if (width < MIN_DIM || width > MAX_DIM)
-        return 0;
+    // Read first line to determine width
+    if (!fgets(buffer, sizeof(buffer), file))
+        return false; // 修正此处
+    *width = strcspn(buffer, "\n");
+    if (*width < MIN_DIM || *width > MAX_DIM)
+        return false;
 
-    // Verify consistent line widths
-    long pos = ftell(file);
-    char verify_line[MAX_DIM + 2];
-    while (fgets(verify_line, sizeof(verify_line), file))
+    // Verify all lines have consistent width
+    do
     {
-        int verify_len = strcspn(verify_line, "\n");
-        if (verify_len != width)
-        {
-            fseek(file, pos, SEEK_SET);
-            return 0;
-        }
-    }
-    fseek(file, pos, SEEK_SET);
-    return width;
-}
+        (*height)++;
+        int current_width = strcspn(buffer, "\n");
+        if (current_width != *width)
+            return false;
+    } while (fgets(buffer, sizeof(buffer), file));
 
-/**
- * @brief Validate maze file height
- * @param file File pointer
- * @return Valid height (5-100) or 0 for error
- */
-int get_height(FILE *file)
-{
-    rewind(file);
-    int height = 0;
-    char line[MAX_DIM + 2];
-
-    while (fgets(line, sizeof(line), file))
-    {
-        int line_len = strcspn(line, "\n");
-        if (line_len < MIN_DIM || line_len > MAX_DIM)
-            return 0;
-        height++;
-    }
-    return (height >= MIN_DIM && height <= MAX_DIM) ? height : 0;
+    return (*height >= MIN_DIM && *height <= MAX_DIM);
 }
 
 /**
  * @brief Load maze file into structure
- * @param this Maze structure
- * @param file File pointer
- * @return 0 on success, 1 on failure
+ * @param maze Maze pointer
+ * @param filename Maze file path
+ * @return true on success, false on invalid maze
  */
-int read_maze(maze *this, FILE *file)
+bool maze_load(Maze *maze, const char *filename)
 {
-    rewind(file);
-    int s_count = 0, e_count = 0;
-    char line[MAX_DIM + 2];
+    FILE *file = fopen(filename, "r");
+    if (!file)
+        handle_error("File not found", EXIT_FILE_ERROR);
 
-    for (int i = 0; i < this->height; i++)
+    int width, height;
+    if (!validate_maze_file(file, &width, &height))
     {
-        if (!fgets(line, sizeof(line), file))
-            return 1;
-        line[strcspn(line, "\n")] = '\0';
+        fclose(file);
+        return false;
+    }
 
-        for (int j = 0; j < this->width; j++)
+    rewind(file);
+    if (!maze_create(maze, height, width))
+    {
+        fclose(file);
+        return false;
+    }
+
+    int start_count = 0, end_count = 0;
+    char line[MAX_DIM + 2];
+    for (int y = 0; y < height; y++)
+    {
+        fgets(line, sizeof(line), file);
+        line[strcspn(line, "\n")] = '\0'; // Trim newline
+
+        for (int x = 0; x < width; x++)
         {
-            char c = line[j];
+            char c = line[x];
             switch (c)
             {
             case 'S':
-                this->start.x = j;
-                this->start.y = i;
-                s_count++;
+                maze->start = (Coord){x, y};
+                start_count++;
                 break;
             case 'E':
-                this->end.x = j;
-                this->end.y = i;
-                e_count++;
+                maze->end = (Coord){x, y};
+                end_count++;
                 break;
             case ' ':
             case '#':
                 break;
             default:
-                return 1;
+                fclose(file);
+                return false;
             }
-            this->map[i][j] = c;
+            maze->map[y][x] = c;
         }
     }
-    return (s_count == 1 && e_count == 1) ? 0 : 1;
+    fclose(file);
+    return (start_count == 1 && end_count == 1);
 }
 
 /* ================== Game Logic ================== */
 
 /**
  * @brief Print maze with player position
- * @param this Maze structure
+ * @param maze Maze pointer
  * @param player Current player coordinates
  */
-void print_maze(maze *this, coord *player)
+void print_maze(const Maze *maze, const Coord *player)
 {
     printf("\n");
-    for (int i = 0; i < this->height; i++)
+    for (int y = 0; y < maze->height; y++)
     {
-        for (int j = 0; j < this->width; j++)
+        for (int x = 0; x < maze->width; x++)
         {
-            printf("%c", (player->x == j && player->y == i) ? 'X' : this->map[i][j]);
+            printf("%c", (x == player->x && y == player->y) ? 'X' : maze->map[y][x]);
         }
         printf("\n");
     }
@@ -261,36 +247,36 @@ void print_maze(maze *this, coord *player)
 
 /**
  * @brief Process player movement
- * @param this Maze structure
- * @param player Player coordinates
- * @param direction Movement direction
+ * @param maze Maze pointer
+ * @param player Player coordinates (modified in-place)
+ * @param direction Input direction character
  */
-void move(maze *this, coord *player, char direction)
+void process_move(const Maze *maze, Coord *player, char direction)
 {
-    static const MoveDelta directions[] = {
+    static const MoveDelta deltas[] = {
         {'w', 0, -1}, {'a', -1, 0}, {'s', 0, 1}, {'d', 1, 0}};
 
     direction = tolower(direction);
-    for (size_t i = 0; i < sizeof(directions) / sizeof(directions[0]); i++)
+    for (size_t i = 0; i < sizeof(deltas) / sizeof(deltas[0]); i++)
     {
-        if (directions[i].dir == direction)
+        if (deltas[i].dir == direction)
         {
-            coord new_pos = {
-                player->x + directions[i].dx,
-                player->y + directions[i].dy};
+            Coord new_pos = {
+                player->x + deltas[i].dx,
+                player->y + deltas[i].dy};
 
             // Boundary check
-            if (new_pos.x < 0 || new_pos.x >= this->width ||
-                new_pos.y < 0 || new_pos.y >= this->height)
+            if (new_pos.x < 0 || new_pos.x >= maze->width ||
+                new_pos.y < 0 || new_pos.y >= maze->height)
             {
-                printf("Invalid move: out of bounds\n");
+                printf("Out of bounds!\n");
                 return;
             }
 
-            // Collision detection
-            if (this->map[new_pos.y][new_pos.x] == '#')
+            // Collision check
+            if (maze->map[new_pos.y][new_pos.x] == '#')
             {
-                printf("Invalid move: wall detected\n");
+                printf("Wall detected!\n");
                 return;
             }
 
@@ -298,18 +284,7 @@ void move(maze *this, coord *player, char direction)
             return;
         }
     }
-    printf("Invalid command: use WASD to move\n");
-}
-
-/**
- * @brief Check victory condition
- * @param this Maze structure
- * @param player Player coordinates
- * @return 1 if player reached exit, 0 otherwise
- */
-int has_won(maze *this, coord *player)
-{
-    return (player->x == this->end.x && player->y == this->end.y);
+    printf("Invalid command. Use WASD to move.\n");
 }
 
 /* ================== Main Program ================== */
@@ -323,68 +298,47 @@ int main(int argc, char *argv[])
         return EXIT_ARG_ERROR;
     }
 
-    // File existence check
-    FILE *f = fopen(argv[1], "r");
-    if (!f)
-        handle_error("File not found");
-
-    // Initialize maze structure
-    maze *this_maze = malloc(sizeof(maze));
-    coord *player = malloc(sizeof(coord));
-    if (!this_maze || !player)
-        handle_error("Memory allocation failed");
-
-    // Read maze dimensions
-    int width = get_width(f);
-    int height = get_height(f);
-    if (!width || !height || create_maze(this_maze, height, width))
+    // Load maze
+    Maze maze = {0};
+    if (!maze_load(&maze, argv[1]))
     {
-        fclose(f);
-        handle_error("Invalid maze dimensions");
+        maze_free(&maze);
+        handle_error("Invalid maze", EXIT_MAZE_ERROR);
     }
 
-    // Load maze content
-    rewind(f);
-    if (read_maze(this_maze, f))
-    {
-        fclose(f);
-        handle_error("Invalid maze content");
-    }
-    fclose(f);
-
-    // Initialize player position
-    *player = this_maze->start;
+    // Initialize player
+    Coord player = maze.start;
+    char input[256];
 
     // Game loop
-    char input;
-    while (1)
+    while (true)
     {
-        printf("Enter move (WASD/M/Q): ");
-        scanf(" %c", &input);
-
-        if (tolower(input) == 'm')
-        {
-            print_maze(this_maze, player);
-        }
-        else if (tolower(input) == 'q')
-        {
+        printf("\nCurrent position: (%d, %d)\n", player.x, player.y);
+        printf("Enter command (WASD/M/Q): ");
+        if (!fgets(input, sizeof(input), stdin))
             break;
-        }
-        else
+
+        char cmd = tolower(input[0]);
+        switch (cmd)
         {
-            move(this_maze, player, input);
+        case 'm':
+            print_maze(&maze, &player);
+            break;
+        case 'q':
+            goto cleanup;
+        default:
+            process_move(&maze, &player, cmd);
         }
 
-        if (has_won(this_maze, player))
+        // Victory check
+        if (player.x == maze.end.x && player.y == maze.end.y)
         {
-            printf("\n=== Victory! ===\n");
+            printf("\n=== You won! ===\n");
             break;
         }
     }
 
-    // Cleanup
-    free_maze(this_maze);
-    free(this_maze);
-    free(player);
+cleanup:
+    maze_free(&maze);
     return EXIT_SUCCESS;
 }
